@@ -152,6 +152,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 
 	if args.Term > rf.currentTerm {
 		rf.mu.Unlock()
+		// TODO: this is suboptimal. ideally we want the electionNotice channel to also reset the election state
 		rf.resetElectionState(args.Term)
 		rf.mu.Lock()
 		if rf.state == leader || rf.state == candidate {
@@ -159,16 +160,15 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 		}
 	}
 
+	reply.Term = rf.currentTerm
+	reply.VoteGranted = false
+
 	if rf.votedFor == -1 || rf.votedFor == args.CandidateId {
 		rf.votedFor = args.CandidateId
-		reply.Term = rf.currentTerm
 		reply.VoteGranted = true
 		rf.mu.Unlock()
 		rf.voteNotice <- 1
 		rf.mu.Lock()
-	} else {
-		reply.Term = rf.currentTerm
-		reply.VoteGranted = false
 	}
 	defer rf.mu.Unlock()
 }

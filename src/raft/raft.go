@@ -104,7 +104,7 @@ func (rf *Raft) relay(channel chan int, msg string) {
 	select {
 	case channel <- 1:
 	default:
-		// DPrintf("over %s as %d from %d\n", msg, rf.state, rf.me)
+		DPrintf("over %s as %d from %d\n", msg, rf.state, rf.me)
 	}
 }
 
@@ -351,6 +351,7 @@ func (rf *Raft) dispatchFollower() {
 		case <-rf.voteNotice:
 		case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
 			rf.switchState(candidate)
+			return
 		}
 	}
 }
@@ -358,7 +359,6 @@ func (rf *Raft) dispatchFollower() {
 func (rf *Raft) dispatchCandidate() {
 	rf.mu.Lock()
 	rf.currentTerm++
-	localTerm := rf.currentTerm
 	rf.votedFor = rf.me
 	// we create a channel to tally the votes
 	tally := make(chan int)
@@ -374,17 +374,20 @@ func (rf *Raft) dispatchCandidate() {
 	}
 	rf.mu.Unlock()
 
-	for rf.state == candidate && rf.currentTerm == localTerm {
+	for rf.state == candidate {
 		select {
 		case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
 			rf.switchState(candidate)
+			return
 		case <-tally:
 			totalVotes++
 			if totalVotes > len(rf.peers)/2 {
 				rf.switchState(leader)
+				return
 			}
 		case <-rf.electionNotice:
 			rf.switchState(follower)
+			return
 		}
 	}
 }
@@ -421,6 +424,7 @@ func (rf *Raft) dispatchLeader() {
 			rf.mu.Unlock()
 		case <-rf.electionNotice:
 			rf.switchState(follower)
+			return
 		}
 	}
 

@@ -221,7 +221,11 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		return
 	}
 
-	if args.Term > rf.currentTerm {
+	// TODO this is problematic, particularly in conflict with paper.6.4
+	// we need to step down to a follower if the appendentries term being receives
+	// is at least as large as our own, not stricly larger
+	// if args.Term > rf.currentTerm { <-- this was problematic, but we'll keep it here for now
+	if args.Term > rf.currentTerm || rf.state == candidate {
 		rf.resetElectionState(args.Term)
 	}
 

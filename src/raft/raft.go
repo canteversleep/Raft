@@ -99,6 +99,21 @@ func (rf *Raft) lastIndex() int {
 	return len(rf.log) - 1
 }
 
+// non blocking send to chan
+func (rf *Raft) relay(channel chan int, msg string) {
+	select {
+	case channel <- 1:
+	default:
+		DPrintf("over %s as %d\n", msg, rf.state)
+	}
+}
+
+func (rf *Raft) sanitizeChannels() {
+	rf.electionNotice = make(chan int)
+	rf.heartbeatNotice = make(chan int)
+	rf.voteNotice = make(chan int)
+}
+
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
@@ -163,9 +178,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 	if rf.votedFor == -1 || rf.votedFor == args.CandidateId {
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
-		rf.mu.Unlock()
-		rf.voteNotice <- 1
-		rf.mu.Lock()
+		rf.relay(rf.voteNotice, "vote")
 	}
 	defer rf.mu.Unlock()
 }
@@ -239,7 +252,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 	reply.Term = rf.currentTerm
 
 	if rf.state == follower {
-		rf.heartbeatNotice <- 1
+		rf.relay(rf.heartbeatNotice, "heart")
 	}
 	// SYNC
 }
@@ -301,12 +314,16 @@ func (rf *Raft) resetElectionState(newTerm int) {
 	rf.votedFor = -1
 	rf.currentTerm = newTerm
 	if rf.state == leader || rf.state == candidate {
-		rf.electionNotice <- 1
+		// rf.electionNotice <- 1
+		rf.relay(rf.electionNotice, "election")
 	}
 }
 
 func (rf *Raft) switchState(newState MEMBER_STATE) {
 	rf.mu.Lock()
+	// whenever we switch state, we might have some stale requests arriving belonging to other shit. for this purpose we
+	// reset the channels
+	rf.sanitizeChannels()
 	rf.state = newState
 	rf.mu.Unlock()
 	switch newState {

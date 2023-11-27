@@ -104,7 +104,7 @@ func (rf *Raft) relay(channel chan int, msg string) {
 	select {
 	case channel <- 1:
 	default:
-		DPrintf("over %s as %d from %d\n", msg, rf.state, rf.me)
+		// DPrintf("over %s as %d from %d\n", msg, rf.state, rf.me)
 	}
 }
 
@@ -345,7 +345,6 @@ func (rf *Raft) switchState(newState MEMBER_STATE) {
 }
 
 func (rf *Raft) dispatchFollower() {
-	// for rf.state == follower {
 	for {
 		select {
 		case <-rf.heartbeatNotice:
@@ -361,25 +360,25 @@ func (rf *Raft) dispatchCandidate() {
 	rf.mu.Lock()
 	rf.currentTerm++
 	rf.votedFor = rf.me
-	rf.mu.Unlock()
+	// rf.mu.Unlock()
 	// we create a channel to tally the votes
 	tally := make(chan int)
 	totalVotes := 1
 	// TODO: investigate use of this as a goroutine v. as part of the dispatchCandidate call in the mutex
 	// context immediately preceding
-	go func() {
-		rf.mu.Lock()
-		requestVoteArg := RequestVoteArgs{
-			Term:        rf.currentTerm,
-			CandidateId: rf.me,
+	// go func() {
+	// rf.mu.Lock()
+	requestVoteArg := RequestVoteArgs{
+		Term:        rf.currentTerm,
+		CandidateId: rf.me,
+	}
+	for i := range rf.peers {
+		if i != rf.me {
+			go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
 		}
-		for i := range rf.peers {
-			if i != rf.me {
-				go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
-			}
-		}
-		rf.mu.Unlock()
-	}()
+	}
+	rf.mu.Unlock()
+	// }()
 
 	for {
 		select {

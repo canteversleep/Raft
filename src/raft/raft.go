@@ -104,7 +104,7 @@ func (rf *Raft) relay(channel chan int, msg string) {
 	select {
 	case channel <- 1:
 	default:
-		DPrintf("over %s as %d from %d\n", msg, rf.state, rf.me)
+		// DPrintf("over %s as %d from %d\n", msg, rf.state, rf.me)
 	}
 }
 
@@ -246,16 +246,18 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 	// NOTE this is problematic, particularly in conflict with paper.6.4
 	// we need to step down to a follower if the appendentries term being receives
 	// is at least as large as our own, not stricly larger
-	// if args.Term > rf.currentTerm { <-- this was problematic, but we'll keep it here for now
-	if args.Term > rf.currentTerm || rf.state == candidate {
+	if args.Term > rf.currentTerm { // <-- this was problematic, but actually if we are a candidate and get appendEntries
+		// we should handle it differently
+		// if args.Term > rf.currentTerm || rf.state == candidate {
 		rf.resetElectionState(args.Term)
 	}
 
 	reply.Term = rf.currentTerm
 
-	if rf.state == follower {
-		rf.relay(rf.heartbeatNotice, "heart")
-	}
+	// since we're using the non-blocking relay, this should be fine
+	// if rf.state == follower {
+	rf.relay(rf.heartbeatNotice, "heart")
+	// }
 	// SYNC
 }
 
@@ -358,21 +360,19 @@ func (rf *Raft) dispatchCandidate() {
 	rf.currentTerm++
 	localTerm := rf.currentTerm
 	rf.votedFor = rf.me
-	rf.mu.Unlock()
 	// we create a channel to tally the votes
 	tally := make(chan int)
 	totalVotes := 1
-	go func() {
-		requestVoteArg := RequestVoteArgs{
-			Term:        rf.currentTerm,
-			CandidateId: rf.me,
+	requestVoteArg := RequestVoteArgs{
+		Term:        rf.currentTerm,
+		CandidateId: rf.me,
+	}
+	for i := range rf.peers {
+		if i != rf.me {
+			go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
 		}
-		for i := range rf.peers {
-			if i != rf.me {
-				go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
-			}
-		}
-	}()
+	}
+	rf.mu.Unlock()
 
 	for rf.state == candidate && rf.currentTerm == localTerm {
 		select {

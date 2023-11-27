@@ -45,24 +45,6 @@ const (
 	follower
 )
 
-// DEPRECATE
-// type TIMER_CMD int
-
-// const (
-// 	initialize TIMER_CMD = iota
-// 	reset
-// 	stop
-// )
-
-// DEPRECATE
-// type VOTE_REQ_OUTCOME int
-
-// const (
-// 	granted VOTE_REQ_OUTCOME = iota
-// 	denied
-// 	revert
-// )
-
 // A Go object implementing a single Raft peer.
 type Raft struct {
 	mu        sync.Mutex
@@ -325,6 +307,7 @@ func (rf *Raft) dispatchFollower() {
 func (rf *Raft) dispatchCandidate() {
 	rf.mu.Lock()
 	rf.currentTerm++
+	localTerm := rf.currentTerm
 	rf.votedFor = rf.me
 	rf.mu.Unlock()
 	// we create a channel to tally the votes
@@ -342,21 +325,17 @@ func (rf *Raft) dispatchCandidate() {
 		}
 	}()
 
-	// TODO: one problem with this current design is that we fire the timer AFTER initialization of the reqeuests. this may be problematic
-	for {
+	for rf.state == candidate && rf.currentTerm == localTerm {
 		select {
 		case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
 			rf.switchState(candidate)
-			return
 		case <-tally:
 			totalVotes++
 			if totalVotes > len(rf.peers)/2 {
 				rf.switchState(leader)
-				return
 			}
 		case <-rf.electionNotice:
 			rf.switchState(follower)
-			return
 		}
 	}
 }
@@ -380,34 +359,6 @@ func (rf *Raft) dispatchLeader() {
 	}
 
 }
-
-// DEPRECATED
-// func (rf *Raft) dispatchTimerOp(cmd TIMER_CMD) {
-// 	rf.mu.Lock()
-// 	defer rf.mu.Unlock()
-// 	switch cmd {
-// 	case initialize:
-// 		rf.electionTimeout = time.Duration(rand.Intn(150)+150) * time.Millisecond
-// 		rf.timer = time.NewTimer(rf.electionTimeout)
-// 	case reset:
-// 		if !rf.timer.Stop() {
-// 			// Drain the channel if the timer had already expired
-// 			select {
-// 			case <-rf.timer.C:
-// 			default:
-// 			}
-// 		}
-// 		rf.timer.Reset(rf.electionTimeout)
-// 	case stop:
-// 		if !rf.timer.Stop() {
-// 			// Drain the channel if the timer had already expired
-// 			select {
-// 			case <-rf.timer.C:
-// 			default:
-// 			}
-// 		}
-// 	}
-// }
 
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this

@@ -45,13 +45,14 @@ const (
 	follower
 )
 
-type TIMER_CMD int
+// DEPRECATE
+// type TIMER_CMD int
 
-const (
-	initialize TIMER_CMD = iota
-	reset
-	stop
-)
+// const (
+// 	initialize TIMER_CMD = iota
+// 	reset
+// 	stop
+// )
 
 type VOTE_REQ_OUTCOME int
 
@@ -153,12 +154,8 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 
 	if args.Term > rf.currentTerm {
 		rf.mu.Unlock()
-		// TODO: this is suboptimal. ideally we want the electionNotice channel to also reset the election state
 		rf.resetElectionState(args.Term)
 		rf.mu.Lock()
-		// if rf.state == leader || rf.state == candidate {
-		// 	rf.electionNotice <- 1 // inform leader or candidate to demote selves
-		// }
 	}
 
 	reply.Term = rf.currentTerm
@@ -202,9 +199,7 @@ func (rf *Raft) sendRequestVoteWrapper(server int, args RequestVoteArgs, replyTo
 	}
 
 	if response.Term > rf.currentTerm {
-		// TODO: same thing is going on here. it seems to be an antipattern. we could use the int of the electionNotice channel to update the term
 		rf.resetElectionState(response.Term)
-		// rf.electionNotice <- 1
 		return
 	} else if response.VoteGranted {
 		replyTo <- granted
@@ -230,22 +225,22 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
+	// HEARTBEAT PORTION
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		return
-	} else if args.Term >= rf.currentTerm {
-		if args.Term > rf.currentTerm {
-			// TODO: and again
-			rf.resetElectionState(args.Term)
-			reply.Term = rf.currentTerm
-		}
-
-		if rf.state == follower {
-			rf.heartbeatNotice <- 1
-		}
-
-		return
 	}
+
+	if args.Term > rf.currentTerm {
+		rf.resetElectionState(args.Term)
+	}
+
+	reply.Term = rf.currentTerm
+
+	if rf.state == follower {
+		rf.heartbeatNotice <- 1
+	}
+	// SYNC
 }
 
 // TODOedit later to delegate functionality to leader dispatch

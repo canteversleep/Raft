@@ -93,6 +93,12 @@ func (rf *Raft) GetState() (int, bool) {
 	return term, isleader
 }
 
+// other getters and setters here
+
+func (rf *Raft) lastIndex() int {
+	return len(rf.log) - 1
+}
+
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
@@ -186,7 +192,8 @@ func (rf *Raft) sendRequestVoteWrapper(server int, args RequestVoteArgs, replyTo
 		return
 	}
 
-	// catch some rare race conditions
+	// catch some rare race conditions: particularly, if the response is coming after the state has changes from cand,
+	// to either follower or leader, or when the request or response is for a previous election <- could happen
 	if rf.state != candidate || args.Term != rf.currentTerm || response.Term < rf.currentTerm {
 		return
 	}
@@ -221,7 +228,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		return
 	}
 
-	// TODO this is problematic, particularly in conflict with paper.6.4
+	// NOTE this is problematic, particularly in conflict with paper.6.4
 	// we need to step down to a follower if the appendentries term being receives
 	// is at least as large as our own, not stricly larger
 	// if args.Term > rf.currentTerm { <-- this was problematic, but we'll keep it here for now
@@ -277,7 +284,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// NOTE: may want to load term into own var. but mutex should allow repeated access from rf object
 	rf.log = append(rf.log, LogEntry{rf.currentTerm, command})
 
-	return len(rf.log) - 1, rf.currentTerm, true
+	return rf.lastIndex(), rf.currentTerm, true
 }
 
 // the tester calls Kill() when a Raft instance won't
@@ -361,6 +368,16 @@ func (rf *Raft) dispatchCandidate() {
 
 func (rf *Raft) dispatchLeader() {
 
+	// do we want to setup the state here? i feel like itd probably be better before beginning the loop to ensure
+	// all state is ready before broadcasting appendentries. but we could also do it in switchstate
+
+	rf.nextIndex = make([]int, len(rf.peers))
+	rf.matchIndex = make([]int, len(rf.peers))
+	lastLogIndex := rf.lastIndex() + 1
+	for i := range rf.peers {
+		rf.nextIndex[i] = lastLogIndex
+	}
+
 	for rf.state == leader {
 		select {
 		case <-time.After(100 * time.Millisecond):
@@ -402,6 +419,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.votedFor = -1
 	rf.state = follower
 	rf.currentTerm = 0
+	rf.commitIndex = 0
+	rf.lastApplied = 0
 	rf.electionNotice = make(chan int)
 	rf.heartbeatNotice = make(chan int)
 	rf.voteNotice = make(chan int)

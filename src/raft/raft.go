@@ -76,9 +76,10 @@ type Raft struct {
 	votedFor    int
 	state       MEMBER_STATE
 
+	// DEPRECATED
 	// timer and channel in case i am a follower
-	timer           *time.Timer
-	electionTimeout time.Duration
+	// timer           *time.Timer
+	// electionTimeout time.Duration
 	// put channel for immediate demotion of leaders/candidates in case of special election
 	// this channel's use is restricted to receipt of RequestVote and AmendLog RPCs when state is leader or candidate
 	// a handler is dispatched which then reverts leaders and candidates to followers
@@ -201,6 +202,7 @@ func (rf *Raft) sendRequestVoteWrapper(server int, args RequestVoteArgs, replyTo
 	}
 
 	if response.Term > rf.currentTerm {
+		// TODO: same thing is going on here. it seems to be an antipattern. we could use the int of the electionNotice channel to update the term
 		rf.resetElectionState(response.Term)
 		rf.electionNotice <- 1
 		return
@@ -233,6 +235,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		return
 	} else if args.Term >= rf.currentTerm {
 		if args.Term > rf.currentTerm {
+			// TODO: and again
 			rf.resetElectionState(args.Term)
 			if rf.state == leader || rf.state == candidate {
 				rf.electionNotice <- 1

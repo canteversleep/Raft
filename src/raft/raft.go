@@ -164,7 +164,6 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = true
 		rf.mu.Unlock()
-		// rf.dispatchTimerOp(reset)
 		rf.voteNotice <- 1
 		rf.mu.Lock()
 	} else {
@@ -192,15 +191,23 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 
 func (rf *Raft) sendRequestVoteWrapper(server int, args RequestVoteArgs, replyTo chan VOTE_REQ_OUTCOME) {
 	var response RequestVoteReply
-	if rf.sendRequestVote(server, args, &response) {
-		if response.VoteGranted {
-			replyTo <- granted
-		} else if rf.currentTerm < response.Term {
-			rf.resetElectionState(response.Term)
-			rf.electionNotice <- 1
-		} else {
-			replyTo <- denied
-		}
+	if !rf.sendRequestVote(server, args, &response) {
+		return
+	}
+
+	// catch some rare race conditions
+	if rf.state != candidate || args.Term != rf.currentTerm || response.Term < rf.currentTerm {
+		return
+	}
+
+	if response.Term > rf.currentTerm {
+		rf.resetElectionState(response.Term)
+		rf.electionNotice <- 1
+		return
+	} else if response.VoteGranted {
+		replyTo <- granted
+	} else {
+		replyTo <- denied
 	}
 
 }
@@ -235,7 +242,6 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		}
 
 		if rf.state == follower {
-			// rf.dispatchTimerOp(reset)
 			rf.heartbeatNotice <- 1
 		}
 
@@ -366,7 +372,7 @@ func (rf *Raft) dispatchCandidate() {
 
 func (rf *Raft) dispatchLeader() {
 
-	for {
+	for rf.state == leader {
 		select {
 		case <-time.After(100 * time.Millisecond):
 			// send heart
@@ -379,39 +385,38 @@ func (rf *Raft) dispatchLeader() {
 			}
 		case <-rf.electionNotice:
 			rf.switchState(follower)
-			return
 		}
 	}
 
 }
 
 // DEPRECATED
-func (rf *Raft) dispatchTimerOp(cmd TIMER_CMD) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	switch cmd {
-	case initialize:
-		rf.electionTimeout = time.Duration(rand.Intn(150)+150) * time.Millisecond
-		rf.timer = time.NewTimer(rf.electionTimeout)
-	case reset:
-		if !rf.timer.Stop() {
-			// Drain the channel if the timer had already expired
-			select {
-			case <-rf.timer.C:
-			default:
-			}
-		}
-		rf.timer.Reset(rf.electionTimeout)
-	case stop:
-		if !rf.timer.Stop() {
-			// Drain the channel if the timer had already expired
-			select {
-			case <-rf.timer.C:
-			default:
-			}
-		}
-	}
-}
+// func (rf *Raft) dispatchTimerOp(cmd TIMER_CMD) {
+// 	rf.mu.Lock()
+// 	defer rf.mu.Unlock()
+// 	switch cmd {
+// 	case initialize:
+// 		rf.electionTimeout = time.Duration(rand.Intn(150)+150) * time.Millisecond
+// 		rf.timer = time.NewTimer(rf.electionTimeout)
+// 	case reset:
+// 		if !rf.timer.Stop() {
+// 			// Drain the channel if the timer had already expired
+// 			select {
+// 			case <-rf.timer.C:
+// 			default:
+// 			}
+// 		}
+// 		rf.timer.Reset(rf.electionTimeout)
+// 	case stop:
+// 		if !rf.timer.Stop() {
+// 			// Drain the channel if the timer had already expired
+// 			select {
+// 			case <-rf.timer.C:
+// 			default:
+// 			}
+// 		}
+// 	}
+// }
 
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this

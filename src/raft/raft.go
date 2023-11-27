@@ -104,7 +104,7 @@ func (rf *Raft) relay(channel chan int, msg string) {
 	select {
 	case channel <- 1:
 	default:
-		DPrintf("over %s as %d\n", msg, rf.state)
+		DPrintf("over %s as %d from %d\n", msg, rf.state, rf.me)
 	}
 }
 
@@ -158,18 +158,16 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here.
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = false
-		rf.mu.Unlock()
 		return
 	}
 
 	if args.Term > rf.currentTerm {
-		rf.mu.Unlock()
 		rf.resetElectionState(args.Term)
-		rf.mu.Lock()
 	}
 
 	reply.Term = rf.currentTerm
@@ -180,7 +178,6 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VoteGranted = true
 		rf.relay(rf.voteNotice, "vote")
 	}
-	defer rf.mu.Unlock()
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -201,9 +198,12 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 
 func (rf *Raft) sendRequestVoteWrapper(server int, args RequestVoteArgs, replyTo chan int) {
 	var response RequestVoteReply
-	if !rf.sendRequestVote(server, args, &response) {
+	ok := rf.sendRequestVote(server, args, &response)
+	if !ok {
 		return
 	}
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
 	// catch some rare race conditions: particularly, if the response is coming after the state has changes from cand,
 	// to either follower or leader, or when the request or response is for a previous election <- could happen
@@ -236,6 +236,8 @@ type AppendEntriesReply struct {
 
 func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
 	// HEARTBEAT PORTION
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		return
@@ -257,17 +259,21 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 	// SYNC
 }
 
-func (rf *Raft) sendAppendEntriesWrapper(server int) {
-	args := AppendEntriesArgs{
-		Term: rf.currentTerm,
-	}
+func (rf *Raft) sendAppendEntriesWrapper(server int, args AppendEntriesArgs) {
+	// args := AppendEntriesArgs{
+	// 	Term: rf.currentTerm,
+	// }
 	var response AppendEntriesReply
-	if rf.sendAppendEntries(server, args, &response) {
-		if response.Term > rf.currentTerm {
-			rf.resetElectionState(response.Term)
-		}
+	ok := rf.sendAppendEntries(server, args, &response)
+	if !ok {
+		return
 	}
 
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if response.Term > rf.currentTerm {
+		rf.resetElectionState(response.Term)
+	}
 }
 
 func (rf *Raft) sendAppendEntries(server int, args AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -309,12 +315,9 @@ func (rf *Raft) Kill() {
 }
 
 func (rf *Raft) resetElectionState(newTerm int) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
 	rf.votedFor = -1
 	rf.currentTerm = newTerm
 	if rf.state == leader || rf.state == candidate {
-		// rf.electionNotice <- 1
 		rf.relay(rf.electionNotice, "election")
 	}
 }
@@ -388,24 +391,31 @@ func (rf *Raft) dispatchLeader() {
 	// do we want to setup the state here? i feel like itd probably be better before beginning the loop to ensure
 	// all state is ready before broadcasting appendentries. but we could also do it in switchstate
 
+	rf.mu.Lock()
 	rf.nextIndex = make([]int, len(rf.peers))
 	rf.matchIndex = make([]int, len(rf.peers))
 	lastLogIndex := rf.lastIndex() + 1
 	for i := range rf.peers {
 		rf.nextIndex[i] = lastLogIndex
 	}
+	rf.mu.Unlock()
 
 	for rf.state == leader {
 		select {
 		case <-time.After(100 * time.Millisecond):
 			// send heart
+			rf.mu.Lock()
 			for i := range rf.peers {
 				if i != rf.me {
-					go func(server int) {
-						rf.sendAppendEntriesWrapper(server)
-					}(i)
+					arg := AppendEntriesArgs{
+						Term: rf.currentTerm,
+					}
+					go func(server int, args AppendEntriesArgs) {
+						rf.sendAppendEntriesWrapper(server, args)
+					}(i, arg)
 				}
 			}
+			rf.mu.Unlock()
 		case <-rf.electionNotice:
 			rf.switchState(follower)
 		}

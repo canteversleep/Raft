@@ -37,6 +37,11 @@ type ApplyMsg struct {
 	Snapshot    []byte // ignore for lab2; only used in lab3
 }
 
+type LogEntry struct {
+	Term    int
+	Command interface{}
+}
+
 type MEMBER_STATE int
 
 const (
@@ -54,19 +59,24 @@ type Raft struct {
 
 	// Your data here.
 	// Look at the paper's Figure 2 for a description of what
-	// state a Raft server must maintain
-	// TODO: add remainder state for part 2 and possibly remove isLeader
+	// persistent state on all servers
 	currentTerm int
 	votedFor    int
-	state       MEMBER_STATE
+	log         []LogEntry
 
-	// DEPRECATED
-	// timer and channel in case i am a follower
-	// timer           *time.Timer
-	// electionTimeout time.Duration
-	// put channel for immediate demotion of leaders/candidates in case of special election
-	// this channel's use is restricted to receipt of RequestVote and AmendLog RPCs when state is leader or candidate
-	// a handler is dispatched which then reverts leaders and candidates to followers
+	// volatile state on all servers
+	commitIndex int
+	lastApplied int
+
+	// leader volatile state
+	nextIndex  []int
+	matchIndex []int
+
+	// states for orchestrating elections beyond whats on the paper.
+	// we have channels for conveying news of election and thus triggering a stepdown,
+	//  relaying heartbeats for resetting timers, and for conveying news of a within-server
+	// vote to a candidate thread
+	state           MEMBER_STATE
 	electionNotice  chan int
 	heartbeatNotice chan int
 	voteNotice      chan int
@@ -223,7 +233,6 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 	// SYNC
 }
 
-// TODOedit later to delegate functionality to leader dispatch
 func (rf *Raft) sendAppendEntriesWrapper(server int) {
 	args := AppendEntriesArgs{
 		Term: rf.currentTerm,
@@ -254,11 +263,17 @@ func (rf *Raft) sendAppendEntries(server int, args AppendEntriesArgs, reply *App
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
-	return index, term, isLeader
+	if rf.state != leader {
+		return -1, rf.currentTerm, false
+	}
+
+	// NOTE: may want to load term into own var. but mutex should allow repeated access from rf object
+	rf.log = append(rf.log, LogEntry{rf.currentTerm, command})
+
+	return len(rf.log) - 1, rf.currentTerm, true
 }
 
 // the tester calls Kill() when a Raft instance won't

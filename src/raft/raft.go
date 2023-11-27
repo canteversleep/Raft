@@ -345,7 +345,8 @@ func (rf *Raft) switchState(newState MEMBER_STATE) {
 }
 
 func (rf *Raft) dispatchFollower() {
-	for rf.state == follower {
+	// for rf.state == follower {
+	for {
 		select {
 		case <-rf.heartbeatNotice:
 		case <-rf.voteNotice:
@@ -360,21 +361,27 @@ func (rf *Raft) dispatchCandidate() {
 	rf.mu.Lock()
 	rf.currentTerm++
 	rf.votedFor = rf.me
+	rf.mu.Unlock()
 	// we create a channel to tally the votes
 	tally := make(chan int)
 	totalVotes := 1
-	requestVoteArg := RequestVoteArgs{
-		Term:        rf.currentTerm,
-		CandidateId: rf.me,
-	}
-	for i := range rf.peers {
-		if i != rf.me {
-			go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
+	// TODO: investigate use of this as a goroutine v. as part of the dispatchCandidate call in the mutex
+	// context immediately preceding
+	go func() {
+		rf.mu.Lock()
+		requestVoteArg := RequestVoteArgs{
+			Term:        rf.currentTerm,
+			CandidateId: rf.me,
 		}
-	}
-	rf.mu.Unlock()
+		for i := range rf.peers {
+			if i != rf.me {
+				go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
+			}
+		}
+		rf.mu.Unlock()
+	}()
 
-	for rf.state == candidate {
+	for {
 		select {
 		case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
 			rf.switchState(candidate)
@@ -406,7 +413,7 @@ func (rf *Raft) dispatchLeader() {
 	}
 	rf.mu.Unlock()
 
-	for rf.state == leader {
+	for {
 		select {
 		case <-time.After(100 * time.Millisecond):
 			// send heart

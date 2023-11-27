@@ -330,11 +330,11 @@ func (rf *Raft) dispatchCandidate() {
 	// we create a channel to tally the votes
 	tally := make(chan int)
 	totalVotes := 1
-	requestVoteArg := RequestVoteArgs{
-		Term:        rf.currentTerm,
-		CandidateId: rf.me,
-	}
 	go func() {
+		requestVoteArg := RequestVoteArgs{
+			Term:        rf.currentTerm,
+			CandidateId: rf.me,
+		}
 		for i := range rf.peers {
 			if i != rf.me {
 				go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
@@ -342,6 +342,7 @@ func (rf *Raft) dispatchCandidate() {
 		}
 	}()
 
+	// TODO: one problem with this current design is that we fire the timer AFTER initialization of the reqeuests. this may be problematic
 	for {
 		select {
 		case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):

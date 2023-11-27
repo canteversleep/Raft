@@ -54,13 +54,14 @@ const (
 // 	stop
 // )
 
-type VOTE_REQ_OUTCOME int
+// DEPRECATE
+// type VOTE_REQ_OUTCOME int
 
-const (
-	granted VOTE_REQ_OUTCOME = iota
-	denied
-	revert
-)
+// const (
+// 	granted VOTE_REQ_OUTCOME = iota
+// 	denied
+// 	revert
+// )
 
 // A Go object implementing a single Raft peer.
 type Raft struct {
@@ -187,7 +188,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
 
-func (rf *Raft) sendRequestVoteWrapper(server int, args RequestVoteArgs, replyTo chan VOTE_REQ_OUTCOME) {
+func (rf *Raft) sendRequestVoteWrapper(server int, args RequestVoteArgs, replyTo chan int) {
 	var response RequestVoteReply
 	if !rf.sendRequestVote(server, args, &response) {
 		return
@@ -202,11 +203,8 @@ func (rf *Raft) sendRequestVoteWrapper(server int, args RequestVoteArgs, replyTo
 		rf.resetElectionState(response.Term)
 		return
 	} else if response.VoteGranted {
-		replyTo <- granted
-	} else {
-		replyTo <- denied
+		replyTo <- 1
 	}
-
 }
 
 func (rf *Raft) sendRequestVote(server int, args RequestVoteArgs, reply *RequestVoteReply) bool {
@@ -330,7 +328,7 @@ func (rf *Raft) dispatchCandidate() {
 	rf.votedFor = rf.me
 	rf.mu.Unlock()
 	// we create a channel to tally the votes
-	tally := make(chan VOTE_REQ_OUTCOME)
+	tally := make(chan int)
 	totalVotes := 1
 	requestVoteArg := RequestVoteArgs{
 		Term:        rf.currentTerm,
@@ -349,15 +347,11 @@ func (rf *Raft) dispatchCandidate() {
 		case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
 			rf.switchState(candidate)
 			return
-		case currentTally := <-tally:
-			switch currentTally {
-			case granted:
-				totalVotes++
-				if totalVotes > len(rf.peers)/2 {
-					rf.switchState(leader)
-					return
-				}
-			case denied:
+		case <-tally:
+			totalVotes++
+			if totalVotes > len(rf.peers)/2 {
+				rf.switchState(leader)
+				return
 			}
 		case <-rf.electionNotice:
 			rf.switchState(follower)

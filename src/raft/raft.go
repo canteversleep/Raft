@@ -156,9 +156,9 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 		// TODO: this is suboptimal. ideally we want the electionNotice channel to also reset the election state
 		rf.resetElectionState(args.Term)
 		rf.mu.Lock()
-		if rf.state == leader || rf.state == candidate {
-			rf.electionNotice <- 1 // inform leader or candidate to demote selves
-		}
+		// if rf.state == leader || rf.state == candidate {
+		// 	rf.electionNotice <- 1 // inform leader or candidate to demote selves
+		// }
 	}
 
 	reply.Term = rf.currentTerm
@@ -204,7 +204,7 @@ func (rf *Raft) sendRequestVoteWrapper(server int, args RequestVoteArgs, replyTo
 	if response.Term > rf.currentTerm {
 		// TODO: same thing is going on here. it seems to be an antipattern. we could use the int of the electionNotice channel to update the term
 		rf.resetElectionState(response.Term)
-		rf.electionNotice <- 1
+		// rf.electionNotice <- 1
 		return
 	} else if response.VoteGranted {
 		replyTo <- granted
@@ -237,10 +237,6 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		if args.Term > rf.currentTerm {
 			// TODO: and again
 			rf.resetElectionState(args.Term)
-			if rf.state == leader || rf.state == candidate {
-				rf.electionNotice <- 1
-			}
-
 			reply.Term = rf.currentTerm
 		}
 
@@ -260,7 +256,6 @@ func (rf *Raft) sendAppendEntriesWrapper(server int) {
 	var response AppendEntriesReply
 	if rf.sendAppendEntries(server, args, &response) {
 		if response.Term > rf.currentTerm {
-			rf.electionNotice <- 1
 			rf.resetElectionState(response.Term)
 		}
 	}
@@ -304,6 +299,9 @@ func (rf *Raft) resetElectionState(newTerm int) {
 	defer rf.mu.Unlock()
 	rf.votedFor = -1
 	rf.currentTerm = newTerm
+	if rf.state == leader || rf.state == candidate {
+		rf.electionNotice <- 1
+	}
 }
 
 func (rf *Raft) switchState(newState MEMBER_STATE) {

@@ -260,9 +260,6 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 }
 
 func (rf *Raft) sendAppendEntriesWrapper(server int, args AppendEntriesArgs) {
-	// args := AppendEntriesArgs{
-	// 	Term: rf.currentTerm,
-	// }
 	var response AppendEntriesReply
 	ok := rf.sendAppendEntries(server, args, &response)
 	if !ok {
@@ -271,6 +268,12 @@ func (rf *Raft) sendAppendEntriesWrapper(server int, args AppendEntriesArgs) {
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	// again some race conditions regarding state transitions similar to the ones handled by sendRequestVoteWrapper
+	if rf.state != leader || args.Term != rf.currentTerm || response.Term < rf.currentTerm {
+		return
+	}
+
 	if response.Term > rf.currentTerm {
 		rf.resetElectionState(response.Term)
 	}

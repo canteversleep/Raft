@@ -400,30 +400,24 @@ func (rf *Raft) dispatchCandidate() {
 		// LastLogIndex: lastLogIndex,
 		// LastLogTerm:  rf.log[lastLogIndex].Term,
 	}
-	// rf.mu.Unlock()
 	// we create a channel to tally the votes
+	timer := time.NewTimer(time.Duration(time.Duration(rand.Intn(150)+150) * time.Millisecond))
 	tally := make(chan int)
 	totalVotes := 1
-	// We probably want to broadcast votes as a goroutine in order to be ready to tally votes as soon as possible.
-	// OTOH, dispatching this as a goroutine means the term starts prior to all the requestvotes being sent out,
-	// possible, since there is a mutex that needs to be acquired. This means a reelection might be triggered
-	// more often than what is necessary
-	// From a point of view of atomicity, we might want this to proceed with a goroutine, since the spec does not
-	// specify any ordering for the candidate operations.
-	// go func() {
 	for i := range rf.peers {
 		if i != rf.me {
 			go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
 		}
 	}
 	rf.mu.Unlock()
-	// }()
 
 	for {
 		select {
-		case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
+		// case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
+		case <-timer.C:
 			rf.switchStateLocked(candidate)
 			return
+			// TODO: big error
 		case <-tally:
 			totalVotes++
 			if totalVotes > len(rf.peers)/2 {

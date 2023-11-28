@@ -190,12 +190,11 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 	reply.Term = rf.currentTerm
 	reply.VoteGranted = false
 
-	// lastLogIndex := rf.lastIndex()
-	// lastLogTerm := rf.log[lastLogIndex].Term
-	// upToDate := args.LastLogTerm > lastLogTerm || (args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex)
+	lastLogIndex := rf.lastIndex()
+	lastLogTerm := rf.log[lastLogIndex].Term
+	upToDate := args.LastLogTerm > lastLogTerm || (args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex)
 
-	// if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && upToDate {
-	if rf.votedFor == -1 || rf.votedFor == args.CandidateId {
+	if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && upToDate {
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
 		rf.relay(rf.voteNotice, "vote")
@@ -399,12 +398,12 @@ func (rf *Raft) dispatchCandidate() {
 	rf.nVotes = 1
 	me := rf.me
 	localTerm := rf.currentTerm
-	// lastLogIndex := rf.lastIndex()
+	lastLogIndex := rf.lastIndex()
 	requestVoteArg := RequestVoteArgs{
-		Term:        localTerm,
-		CandidateId: me,
-		// LastLogIndex: lastLogIndex,
-		// LastLogTerm:  rf.log[lastLogIndex].Term,
+		Term:         localTerm,
+		CandidateId:  me,
+		LastLogIndex: lastLogIndex,
+		LastLogTerm:  rf.log[lastLogIndex].Term,
 	}
 	// we create a channel to tally the votes
 	for i := range rf.peers {
@@ -446,17 +445,17 @@ func (rf *Raft) dispatchLeader() {
 			rf.mu.Lock()
 			for i := range rf.peers {
 				if i != rf.me {
-					// prevLogIndex := rf.nextIndex[i] - 1
-					// entriesSlice := rf.log[rf.nextIndex[i]:]
-					// entries := make([]LogEntry, len(entriesSlice))
-					// copy(entries, entriesSlice)
+					prevLogIndex := rf.nextIndex[i] - 1
+					entriesSlice := rf.log[rf.nextIndex[i]:]
+					entries := make([]LogEntry, len(entriesSlice))
+					copy(entries, entriesSlice)
 					args := AppendEntriesArgs{
-						Term:     rf.currentTerm,
-						LeaderId: rf.me,
-						// PrevLogIndex: prevLogIndex,
-						// PrevLogTerm:  rf.log[prevLogIndex].Term,
-						// LeaderCommit: rf.commitIndex,
-						// Entries:      entries,
+						Term:         rf.currentTerm,
+						LeaderId:     rf.me,
+						PrevLogIndex: prevLogIndex,
+						PrevLogTerm:  rf.log[prevLogIndex].Term,
+						LeaderCommit: rf.commitIndex,
+						Entries:      entries,
 					}
 					go rf.sendAppendEntriesWrapper(i, args)
 				}
@@ -497,6 +496,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.heartbeatNotice = make(chan int)
 	rf.voteNotice = make(chan int)
 	rf.wonNotice = make(chan int)
+	rf.log = append(rf.log, LogEntry{Term: 0})
 	rf.mu.Unlock()
 
 	// initialize from state persisted before a crash

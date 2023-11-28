@@ -92,6 +92,8 @@ type Raft struct {
 	electionNotice  chan int
 	heartbeatNotice chan int
 	voteNotice      chan int
+	wonNotice       chan int
+	nVotes          int
 }
 
 // return currentTerm and whether this server
@@ -216,7 +218,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
 
-func (rf *Raft) sendRequestVoteWrapper(server int, args RequestVoteArgs, replyTo chan int) {
+func (rf *Raft) sendRequestVoteWrapper(server int, args RequestVoteArgs) {
 	var response RequestVoteReply
 	ok := rf.sendRequestVote(server, args, &response)
 	if !ok {
@@ -236,7 +238,10 @@ func (rf *Raft) sendRequestVoteWrapper(server int, args RequestVoteArgs, replyTo
 		rf.resetElectionState(response.Term)
 		return
 	} else if response.VoteGranted {
-		replyTo <- 1
+		rf.nVotes++
+		if rf.nVotes > len(rf.peers)/2 {
+			rf.relay(rf.wonNotice, "won election")
+		}
 	}
 }
 
@@ -391,6 +396,7 @@ func (rf *Raft) dispatchCandidate() {
 	rf.mu.Lock()
 	rf.currentTerm++
 	rf.votedFor = rf.me
+	rf.nVotes = 1
 	me := rf.me
 	localTerm := rf.currentTerm
 	// lastLogIndex := rf.lastIndex()
@@ -401,31 +407,22 @@ func (rf *Raft) dispatchCandidate() {
 		// LastLogTerm:  rf.log[lastLogIndex].Term,
 	}
 	// we create a channel to tally the votes
-	timer := time.NewTimer(time.Duration(time.Duration(rand.Intn(150)+150) * time.Millisecond))
-	tally := make(chan int)
-	totalVotes := 1
 	for i := range rf.peers {
 		if i != rf.me {
-			go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
+			go rf.sendRequestVoteWrapper(i, requestVoteArg)
 		}
 	}
 	rf.mu.Unlock()
 
 	for {
 		select {
-		// case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
-		case <-timer.C:
+		case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
 			rf.switchStateLocked(candidate)
 			return
-			// TODO: big error
-		case <-tally:
-			totalVotes++
-			if totalVotes > len(rf.peers)/2 {
-				rf.switchStateLocked(leader)
-				return
-			}
+		case <-rf.wonNotice:
+			rf.switchStateLocked(leader)
+			return
 		case <-rf.electionNotice:
-			// rf.switchStateLocked(follower)
 			return
 		}
 	}
@@ -466,7 +463,6 @@ func (rf *Raft) dispatchLeader() {
 			}
 			rf.mu.Unlock()
 		case <-rf.electionNotice:
-			// rf.switchStateLocked(follower)
 			return
 		}
 	}
@@ -496,9 +492,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.currentTerm = 0
 	rf.commitIndex = 0
 	rf.lastApplied = 0
+	rf.nVotes = 0
 	rf.electionNotice = make(chan int)
 	rf.heartbeatNotice = make(chan int)
 	rf.voteNotice = make(chan int)
+	rf.wonNotice = make(chan int)
 	rf.mu.Unlock()
 
 	// initialize from state persisted before a crash

@@ -329,11 +329,12 @@ func (rf *Raft) resetElectionState(newTerm int) {
 
 func (rf *Raft) switchState(newState MEMBER_STATE) {
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	// whenever we switch state, we might have some stale requests arriving belonging to other shit. for this purpose we
 	// reset the channels
 	rf.sanitizeChannels()
 	rf.state = newState
-	rf.mu.Unlock()
+	// rf.mu.Unlock()
 	switch newState {
 	case follower:
 		go rf.dispatchFollower()
@@ -360,25 +361,29 @@ func (rf *Raft) dispatchCandidate() {
 	rf.mu.Lock()
 	rf.currentTerm++
 	rf.votedFor = rf.me
-	// rf.mu.Unlock()
+	me := rf.me
+	localTerm := rf.currentTerm
+	rf.mu.Unlock()
 	// we create a channel to tally the votes
 	tally := make(chan int)
 	totalVotes := 1
-	// TODO: investigate use of this as a goroutine v. as part of the dispatchCandidate call in the mutex
-	// context immediately preceding
-	// go func() {
-	// rf.mu.Lock()
-	requestVoteArg := RequestVoteArgs{
-		Term:        rf.currentTerm,
-		CandidateId: rf.me,
-	}
-	for i := range rf.peers {
-		if i != rf.me {
-			go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
+	// We probably want to broadcast votes as a goroutine in order to be ready to tally votes as soon as possible.
+	// OTOH, dispatching this as a goroutine means the term starts prior to all the requestvotes being sent out,
+	// possible, since there is a mutex that needs to be acquired. This means a reelection might be triggered
+	// more often than what is necessary
+	// From a point of view of atomicity, we might want this to proceed with a goroutine, since the spec does not
+	// specify any ordering for the candidate operations.
+	go func() {
+		requestVoteArg := RequestVoteArgs{
+			Term:        localTerm,
+			CandidateId: me,
 		}
-	}
-	rf.mu.Unlock()
-	// }()
+		for i := range rf.peers {
+			if i != rf.me {
+				go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
+			}
+		}
+	}()
 
 	for {
 		select {
@@ -419,12 +424,12 @@ func (rf *Raft) dispatchLeader() {
 			rf.mu.Lock()
 			for i := range rf.peers {
 				if i != rf.me {
-					arg := AppendEntriesArgs{
+					args := AppendEntriesArgs{
 						Term: rf.currentTerm,
 					}
-					go func(server int, args AppendEntriesArgs) {
-						rf.sendAppendEntriesWrapper(server, args)
-					}(i, arg)
+					// go func(server int, args AppendEntriesArgs) {
+					go rf.sendAppendEntriesWrapper(i, args)
+					// }(i, arg)
 				}
 			}
 			rf.mu.Unlock()

@@ -347,7 +347,7 @@ func (rf *Raft) resetElectionState(newTerm int) {
 	rf.currentTerm = newTerm
 	if rf.state != follower {
 		rf.relay(rf.electionNotice, "election")
-		// rf.switchState(follower)
+		rf.switchState(follower)
 	}
 }
 
@@ -400,7 +400,7 @@ func (rf *Raft) dispatchCandidate() {
 		// LastLogIndex: lastLogIndex,
 		// LastLogTerm:  rf.log[lastLogIndex].Term,
 	}
-	rf.mu.Unlock()
+	// rf.mu.Unlock()
 	// we create a channel to tally the votes
 	tally := make(chan int)
 	totalVotes := 1
@@ -410,15 +410,16 @@ func (rf *Raft) dispatchCandidate() {
 	// more often than what is necessary
 	// From a point of view of atomicity, we might want this to proceed with a goroutine, since the spec does not
 	// specify any ordering for the candidate operations.
-	go func() {
-		for i := range rf.peers {
-			if i != rf.me {
-				go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
-			}
+	// go func() {
+	for i := range rf.peers {
+		if i != rf.me {
+			go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
 		}
-	}()
+	}
+	rf.mu.Unlock()
+	// }()
 
-	for rf.state == candidate {
+	for {
 		select {
 		case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
 			rf.switchStateLocked(candidate)
@@ -430,7 +431,7 @@ func (rf *Raft) dispatchCandidate() {
 				return
 			}
 		case <-rf.electionNotice:
-			rf.switchStateLocked(follower)
+			// rf.switchStateLocked(follower)
 			return
 		}
 	}
@@ -447,9 +448,9 @@ func (rf *Raft) dispatchLeader() {
 	}
 	rf.mu.Unlock()
 
-	for rf.state == leader {
+	for {
 		select {
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(50 * time.Millisecond):
 			// send heart
 			rf.mu.Lock()
 			for i := range rf.peers {
@@ -471,7 +472,7 @@ func (rf *Raft) dispatchLeader() {
 			}
 			rf.mu.Unlock()
 		case <-rf.electionNotice:
-			rf.switchStateLocked(follower)
+			// rf.switchStateLocked(follower)
 			return
 		}
 	}

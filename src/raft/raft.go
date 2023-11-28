@@ -188,11 +188,12 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 	reply.Term = rf.currentTerm
 	reply.VoteGranted = false
 
-	lastLogIndex := rf.lastIndex()
-	lastLogTerm := rf.log[lastLogIndex].Term
-	upToDate := args.LastLogTerm > lastLogTerm || (args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex)
+	// lastLogIndex := rf.lastIndex()
+	// lastLogTerm := rf.log[lastLogIndex].Term
+	// upToDate := args.LastLogTerm > lastLogTerm || (args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex)
 
-	if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && upToDate {
+	// if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && upToDate {
+	if rf.votedFor == -1 || rf.votedFor == args.CandidateId {
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
 		rf.relay(rf.voteNotice, "vote")

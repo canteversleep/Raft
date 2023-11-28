@@ -116,7 +116,7 @@ func (rf *Raft) relay(channel chan int, msg string) {
 	select {
 	case channel <- 1:
 	default:
-		// DPrintf("[Overflow --> Chan: %s, State: %v ID: %d, Term: %d]\n", msg, rf.state, rf.me, rf.currentTerm)
+		DPrintf("[Overflow --> Chan: %s, State: %v ID: %d, Term: %d]\n", msg, rf.state, rf.me, rf.currentTerm)
 	}
 }
 
@@ -291,7 +291,7 @@ func (rf *Raft) sendAppendEntriesWrapper(server int, args AppendEntriesArgs) {
 	}
 
 	rf.mu.Lock()
-	DPrintf("[SEND{AppendEntries} --> ID: %d, State: %v, Term: %d]", rf.me, rf.state, rf.currentTerm)
+	DPrintf("[SEND{AppendEntries} --> ID: %d, State: %v, Term: %d, To: %d]", rf.me, rf.state, rf.currentTerm, server)
 	defer rf.mu.Unlock()
 
 	// again some race conditions regarding state transitions similar to the ones handled by sendRequestVoteWrapper
@@ -347,7 +347,7 @@ func (rf *Raft) resetElectionState(newTerm int) {
 	rf.currentTerm = newTerm
 	if rf.state != follower {
 		rf.relay(rf.electionNotice, "election")
-		rf.switchState(follower)
+		// rf.switchState(follower)
 	}
 }
 
@@ -393,12 +393,12 @@ func (rf *Raft) dispatchCandidate() {
 	rf.votedFor = rf.me
 	me := rf.me
 	localTerm := rf.currentTerm
-	lastLogIndex := rf.lastIndex()
+	// lastLogIndex := rf.lastIndex()
 	requestVoteArg := RequestVoteArgs{
-		Term:         localTerm,
-		CandidateId:  me,
-		LastLogIndex: lastLogIndex,
-		LastLogTerm:  rf.log[lastLogIndex].Term,
+		Term:        localTerm,
+		CandidateId: me,
+		// LastLogIndex: lastLogIndex,
+		// LastLogTerm:  rf.log[lastLogIndex].Term,
 	}
 	rf.mu.Unlock()
 	// we create a channel to tally the votes
@@ -418,7 +418,7 @@ func (rf *Raft) dispatchCandidate() {
 		}
 	}()
 
-	for {
+	for rf.state == candidate {
 		select {
 		case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
 			rf.switchStateLocked(candidate)
@@ -430,7 +430,7 @@ func (rf *Raft) dispatchCandidate() {
 				return
 			}
 		case <-rf.electionNotice:
-			// rf.switchState(follower)
+			rf.switchStateLocked(follower)
 			return
 		}
 	}
@@ -447,31 +447,31 @@ func (rf *Raft) dispatchLeader() {
 	}
 	rf.mu.Unlock()
 
-	for {
+	for rf.state == leader {
 		select {
 		case <-time.After(100 * time.Millisecond):
 			// send heart
 			rf.mu.Lock()
 			for i := range rf.peers {
 				if i != rf.me {
-					prevLogIndex := rf.nextIndex[i] - 1
-					entriesSlice := rf.log[rf.nextIndex[i]:]
-					entries := make([]LogEntry, len(entriesSlice))
-					copy(entries, entriesSlice)
+					// prevLogIndex := rf.nextIndex[i] - 1
+					// entriesSlice := rf.log[rf.nextIndex[i]:]
+					// entries := make([]LogEntry, len(entriesSlice))
+					// copy(entries, entriesSlice)
 					args := AppendEntriesArgs{
-						Term:         rf.currentTerm,
-						LeaderId:     rf.me,
-						PrevLogIndex: prevLogIndex,
-						PrevLogTerm:  rf.log[prevLogIndex].Term,
-						LeaderCommit: rf.commitIndex,
-						Entries:      entries,
+						Term:     rf.currentTerm,
+						LeaderId: rf.me,
+						// PrevLogIndex: prevLogIndex,
+						// PrevLogTerm:  rf.log[prevLogIndex].Term,
+						// LeaderCommit: rf.commitIndex,
+						// Entries:      entries,
 					}
 					go rf.sendAppendEntriesWrapper(i, args)
 				}
 			}
 			rf.mu.Unlock()
 		case <-rf.electionNotice:
-			// rf.switchState(follower)
+			rf.switchStateLocked(follower)
 			return
 		}
 	}

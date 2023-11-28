@@ -180,9 +180,6 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
-	// TODO: important! this is likely where we have state mashup. we would like to grant votes but we may be a candidate or even a leader
-	// the problem is that resetElectionState does not ensure the server becomes a follower prior to receiving the first heartbeat. since this
-	// entire function is atomic. a refactor could be to switch state to follower within resetElectionState
 	if args.Term > rf.currentTerm {
 		rf.resetElectionState(args.Term)
 	}

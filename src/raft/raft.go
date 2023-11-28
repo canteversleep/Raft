@@ -53,11 +53,11 @@ const (
 func (e MEMBER_STATE) String() string {
 	switch e {
 	case leader:
-		return "leader"
+		return "Leader"
 	case candidate:
-		return "candidate"
+		return "Candidate"
 	case follower:
-		return "follower"
+		return "Follower"
 	}
 	return ""
 }
@@ -116,7 +116,7 @@ func (rf *Raft) relay(channel chan int, msg string) {
 	select {
 	case channel <- 1:
 	default:
-		// DPrintf("over %s as %d from %d\n", msg, rf.state, rf.me)
+		// DPrintf("[Overflow --> Chan: %s, State: %v ID: %d, Term: %d]\n", msg, rf.state, rf.me, rf.currentTerm)
 	}
 }
 
@@ -219,6 +219,7 @@ func (rf *Raft) sendRequestVoteWrapper(server int, args RequestVoteArgs, replyTo
 	}
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	DPrintf("[SEND{RequestVote} --> ID: %d, State: %v, Term: %d]", rf.me, rf.state, rf.currentTerm)
 
 	// catch some rare race conditions: particularly, if the response is coming after the state has changes from cand,
 	// to either follower or leader, or when the request or response is for a previous election <- could happen
@@ -253,6 +254,8 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 	// HEARTBEAT PORTION
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	DPrintf("[RECV{AppendEntries} --> ID: %d, State: %v, Term: %d]", rf.me, rf.state, rf.currentTerm)
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		return
@@ -276,6 +279,7 @@ func (rf *Raft) sendAppendEntriesWrapper(server int, args AppendEntriesArgs) {
 	}
 
 	rf.mu.Lock()
+	DPrintf("[SEND{AppendEntries} --> ID: %d, State: %v, Term: %d]", rf.me, rf.state, rf.currentTerm)
 	defer rf.mu.Unlock()
 
 	// again some race conditions regarding state transitions similar to the ones handled by sendRequestVoteWrapper
@@ -331,17 +335,16 @@ func (rf *Raft) resetElectionState(newTerm int) {
 	rf.currentTerm = newTerm
 	if rf.state != follower {
 		rf.relay(rf.electionNotice, "election")
-		// rf.switchState(follower)
+		rf.switchState(follower)
 	}
 }
 
 func (rf *Raft) switchState(newState MEMBER_STATE) {
-	rf.mu.Lock()
 	// whenever we switch state, we might have some stale requests arriving belonging to other shit. for this purpose we
 	// reset the channels
 	rf.sanitizeChannels()
+	DPrintf("[Transition --> ID: %d, From: %v, To: %v, Term: %d]", rf.me, rf.state, newState, rf.currentTerm)
 	rf.state = newState
-	rf.mu.Unlock()
 	switch newState {
 	case follower:
 		go rf.dispatchFollower()
@@ -352,6 +355,12 @@ func (rf *Raft) switchState(newState MEMBER_STATE) {
 	}
 }
 
+func (rf *Raft) switchStateLocked(newState MEMBER_STATE) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.switchState(newState)
+}
+
 // follower function. fairly straightforward
 func (rf *Raft) dispatchFollower() {
 	for {
@@ -359,7 +368,7 @@ func (rf *Raft) dispatchFollower() {
 		case <-rf.heartbeatNotice:
 		case <-rf.voteNotice:
 		case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
-			rf.switchState(candidate)
+			rf.switchStateLocked(candidate)
 			return
 		}
 	}
@@ -397,16 +406,16 @@ func (rf *Raft) dispatchCandidate() {
 	for {
 		select {
 		case <-time.After(time.Duration(rand.Intn(150)+150) * time.Millisecond):
-			rf.switchState(candidate)
+			rf.switchStateLocked(candidate)
 			return
 		case <-tally:
 			totalVotes++
 			if totalVotes > len(rf.peers)/2 {
-				rf.switchState(leader)
+				rf.switchStateLocked(leader)
 				return
 			}
 		case <-rf.electionNotice:
-			rf.switchState(follower)
+			// rf.switchState(follower)
 			return
 		}
 	}
@@ -438,7 +447,7 @@ func (rf *Raft) dispatchLeader() {
 			}
 			rf.mu.Unlock()
 		case <-rf.electionNotice:
-			rf.switchState(follower)
+			// rf.switchState(follower)
 			return
 		}
 	}
@@ -476,7 +485,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState()) // does nothing if first init
 
-	rf.switchState(rf.state)
+	rf.switchStateLocked(rf.state)
 
 	return rf
 }

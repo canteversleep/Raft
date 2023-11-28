@@ -243,21 +243,13 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		return
 	}
 
-	// NOTE this is problematic, particularly in conflict with paper.6.4
-	// we need to step down to a follower if the appendentries term being receives
-	// is at least as large as our own, not stricly larger
-	if args.Term > rf.currentTerm { // <-- this was problematic, but actually if we are a candidate and get appendEntries
-		// we should handle it differently
-		// if args.Term > rf.currentTerm || rf.state == candidate {
+	if args.Term > rf.currentTerm {
 		rf.resetElectionState(args.Term)
 	}
 
 	reply.Term = rf.currentTerm
 
-	// since we're using the non-blocking relay, this should be fine
-	// if rf.state == follower {
 	rf.relay(rf.heartbeatNotice, "heart")
-	// }
 	// SYNC
 }
 
@@ -329,12 +321,11 @@ func (rf *Raft) resetElectionState(newTerm int) {
 
 func (rf *Raft) switchState(newState MEMBER_STATE) {
 	rf.mu.Lock()
-	defer rf.mu.Unlock()
 	// whenever we switch state, we might have some stale requests arriving belonging to other shit. for this purpose we
 	// reset the channels
 	rf.sanitizeChannels()
 	rf.state = newState
-	// rf.mu.Unlock()
+	rf.mu.Unlock()
 	switch newState {
 	case follower:
 		go rf.dispatchFollower()
@@ -345,6 +336,7 @@ func (rf *Raft) switchState(newState MEMBER_STATE) {
 	}
 }
 
+// follower function. fairly straightforward
 func (rf *Raft) dispatchFollower() {
 	for {
 		select {
@@ -357,6 +349,7 @@ func (rf *Raft) dispatchFollower() {
 	}
 }
 
+// candidate state function. handles setting up an election and then promoting to leader or resetting
 func (rf *Raft) dispatchCandidate() {
 	rf.mu.Lock()
 	rf.currentTerm++
@@ -403,11 +396,8 @@ func (rf *Raft) dispatchCandidate() {
 	}
 }
 
+// leader function. sends appendentries periodically
 func (rf *Raft) dispatchLeader() {
-
-	// do we want to setup the state here? i feel like itd probably be better before beginning the loop to ensure
-	// all state is ready before broadcasting appendentries. but we could also do it in switchstate
-
 	rf.mu.Lock()
 	rf.nextIndex = make([]int, len(rf.peers))
 	rf.matchIndex = make([]int, len(rf.peers))
@@ -427,9 +417,7 @@ func (rf *Raft) dispatchLeader() {
 					args := AppendEntriesArgs{
 						Term: rf.currentTerm,
 					}
-					// go func(server int, args AppendEntriesArgs) {
 					go rf.sendAppendEntriesWrapper(i, args)
-					// }(i, arg)
 				}
 			}
 			rf.mu.Unlock()
@@ -457,8 +445,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
-
-	// Your initialization code here.
 
 	rf.mu.Lock()
 	rf.votedFor = -1

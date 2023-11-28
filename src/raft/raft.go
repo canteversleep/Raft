@@ -50,6 +50,18 @@ const (
 	follower
 )
 
+func (e MEMBER_STATE) String() string {
+	switch e {
+	case leader:
+		return "leader"
+	case candidate:
+		return "candidate"
+	case follower:
+		return "follower"
+	}
+	return ""
+}
+
 // A Go object implementing a single Raft peer.
 type Raft struct {
 	mu        sync.Mutex
@@ -166,6 +178,9 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
+	// TODO: important! this is likely where we have state mashup. we would like to grant votes but we may be a candidate or even a leader
+	// the problem is that resetElectionState does not ensure the server becomes a follower prior to receiving the first heartbeat. since this
+	// entire function is atomic. a refactor could be to switch state to follower within resetElectionState
 	if args.Term > rf.currentTerm {
 		rf.resetElectionState(args.Term)
 	}
@@ -314,8 +329,9 @@ func (rf *Raft) Kill() {
 func (rf *Raft) resetElectionState(newTerm int) {
 	rf.votedFor = -1
 	rf.currentTerm = newTerm
-	if rf.state == leader || rf.state == candidate {
+	if rf.state != follower {
 		rf.relay(rf.electionNotice, "election")
+		// rf.switchState(follower)
 	}
 }
 

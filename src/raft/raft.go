@@ -453,8 +453,17 @@ func (rf *Raft) dispatchLeader() {
 			rf.mu.Lock()
 			for i := range rf.peers {
 				if i != rf.me {
+					prevLogIndex := rf.nextIndex[i] - 1
+					entriesSlice := rf.log[rf.nextIndex[i]:]
+					entries := make([]LogEntry, len(entriesSlice))
+					copy(entries, entriesSlice)
 					args := AppendEntriesArgs{
-						Term: rf.currentTerm,
+						Term:         rf.currentTerm,
+						LeaderId:     rf.me,
+						PrevLogIndex: prevLogIndex,
+						PrevLogTerm:  rf.log[prevLogIndex].Term,
+						LeaderCommit: rf.commitIndex,
+						Entries:      entries,
 					}
 					go rf.sendAppendEntriesWrapper(i, args)
 				}

@@ -153,10 +153,10 @@ func (rf *Raft) readPersist(data []byte) {
 // example RequestVote RPC arguments structure.
 type RequestVoteArgs struct {
 	// Your data here.
-	Term        int
-	CandidateId int
-	// LastLogIndex int
-	// LastLogTerm  int
+	Term         int
+	CandidateId  int
+	LastLogIndex int
+	LastLogTerm  int
 }
 
 // example RequestVote RPC reply structure.
@@ -188,7 +188,11 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 	reply.Term = rf.currentTerm
 	reply.VoteGranted = false
 
-	if rf.votedFor == -1 || rf.votedFor == args.CandidateId {
+	lastLogIndex := rf.lastIndex()
+	lastLogTerm := rf.log[lastLogIndex].Term
+	upToDate := args.LastLogTerm > lastLogTerm || (args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex)
+
+	if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && upToDate {
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
 		rf.relay(rf.voteNotice, "vote")
@@ -241,13 +245,20 @@ func (rf *Raft) sendRequestVote(server int, args RequestVoteArgs, reply *Request
 }
 
 type AppendEntriesArgs struct {
-	Term int
+	Term         int
+	LeaderId     int
+	PrevLogIndex int
+	PrevLogTerm  int
+	LeaderCommit int
+	Entries      []LogEntry
 }
 
 // example RequestVote RPC reply structure.
 type AppendEntriesReply struct {
-	Term int
-	// Success bol
+	Term          int
+	Success       bool
+	ConflictIndex int
+	ConflictTerm  int
 }
 
 func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -381,6 +392,13 @@ func (rf *Raft) dispatchCandidate() {
 	rf.votedFor = rf.me
 	me := rf.me
 	localTerm := rf.currentTerm
+	lastLogIndex := rf.lastIndex()
+	requestVoteArg := RequestVoteArgs{
+		Term:         localTerm,
+		CandidateId:  me,
+		LastLogIndex: lastLogIndex,
+		LastLogTerm:  rf.log[lastLogIndex].Term,
+	}
 	rf.mu.Unlock()
 	// we create a channel to tally the votes
 	tally := make(chan int)
@@ -392,10 +410,6 @@ func (rf *Raft) dispatchCandidate() {
 	// From a point of view of atomicity, we might want this to proceed with a goroutine, since the spec does not
 	// specify any ordering for the candidate operations.
 	go func() {
-		requestVoteArg := RequestVoteArgs{
-			Term:        localTerm,
-			CandidateId: me,
-		}
 		for i := range rf.peers {
 			if i != rf.me {
 				go rf.sendRequestVoteWrapper(i, requestVoteArg, tally)
